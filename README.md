@@ -4,7 +4,11 @@
 
 > **Optimize the decision, not the score.**
 
-**[Open the live RewardLens dashboard](https://rewardlens-fraud-lab.streamlit.app/)**
+[![Live dashboard](https://img.shields.io/badge/Live_dashboard-Open_RewardLens-FF4B4B?logo=streamlit&logoColor=white)](https://rewardlens-fraud-lab.streamlit.app/)
+[![Latest release](https://img.shields.io/github/v/release/chanderbhanu096/rewardlens-fraud-decision-lab?label=release)](https://github.com/chanderbhanu096/rewardlens-fraud-decision-lab/releases/latest)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+
+**[Open the live RewardLens dashboard →](https://rewardlens-fraud-lab.streamlit.app/)**
 
 RewardLens asks one practical question:
 
@@ -14,6 +18,20 @@ RewardLens asks one practical question:
 **Scope:** every user, outcome, label, and financial value in this repository is
 synthetic. The results demonstrate analytical reasoning, system design, and
 reproducibility—not expected production performance.
+
+## Product tour
+
+The dashboard begins with a real-life comparison between a likely genuine player
+and an emulator farm, then progressively reveals the technical evidence.
+
+[![RewardLens start-here dashboard](assets/screenshots/rewardlens-start-here.jpg)](https://rewardlens-fraud-lab.streamlit.app/)
+
+The threshold lab connects review capacity, false positives, fraud recall, and
+modeled financial value in one operating decision.
+
+[![RewardLens threshold decision lab](assets/screenshots/rewardlens-threshold-lab.jpg)](https://rewardlens-fraud-lab.streamlit.app/)
+
+Both screenshots link directly to the public application.
 
 ## Choose your depth
 
@@ -275,6 +293,13 @@ tests, including render checks for every dashboard page.
 | `dashboard/` | Decision-oriented Streamlit interface |
 | `tests/` | Generator, scoring, and experiment validation |
 | `architecture/` | System-design documentation |
+| `assets/screenshots/` | Verified dashboard images used in this README |
+
+## Versioning
+
+RewardLens follows semantic versioning. The GitHub `main` branch is the latest
+stable portfolio version, while immutable `vX.Y.Z` tags identify published
+releases. See the [changelog](CHANGELOG.md) for release-level changes.
 
 ## Limitations and production path
 
