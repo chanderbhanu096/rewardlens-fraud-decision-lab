@@ -1,5 +1,5 @@
 {
-  "completed_at": "2026-07-13T18:46:21.670446+00:00",
+  "completed_at": "2026-07-13T19:31:08.069679+00:00",
   "generation": {
     "status": "reused existing generated files"
   },
@@ -38,6 +38,27 @@
       "claim_rate_peer_zscore",
       "claim_delay_peer_zscore"
     ],
+    "rule_weights": {
+      "shared_device": 0.22,
+      "emulator": 0.15,
+      "rooted": 0.07,
+      "instant_claims": 0.18,
+      "high_frequency": 0.14,
+      "low_gameplay": 0.08,
+      "high_reward_volume": 0.1,
+      "peer_outlier": 0.06
+    },
+    "detector_weights": {
+      "rule_score": 0.34,
+      "robust_z_score": 0.24,
+      "isolation_score": 0.32,
+      "cluster_score": 0.1
+    },
+    "economic_config": {
+      "fraud_loss_horizon_multiplier": 4.0,
+      "false_positive_fixed_cost_usd": 0.35,
+      "false_positive_revenue_multiplier": 1.5
+    },
     "recommended_threshold": "balanced",
     "recommended_threshold_metrics": {
       "threshold": "balanced",
@@ -50,9 +71,13 @@
       "precision": 0.8991008991008991,
       "recall": 1.0,
       "false_positive_rate": 0.011098901098901099,
+      "specificity": 0.9889010989010989,
+      "f1_score": 0.9468700683850605,
+      "alerts_per_1000_users": 100.1,
       "prevented_loss_usd": 26520.839999999913,
       "false_positive_cost_usd": 142.15370499999997,
-      "estimated_net_savings_usd": 26378.686294999912
+      "estimated_net_savings_usd": 26378.686294999912,
+      "net_savings_per_flagged_user_usd": 26.352333961038873
     }
   },
   "experiment": {

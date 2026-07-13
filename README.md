@@ -13,6 +13,17 @@ RewardLens asks one practical question:
 synthetic. The results demonstrate analytical reasoning, system design, and
 reproducibility—not expected production performance.
 
+## Choose your depth
+
+If this is your first behavioural-fraud project, begin with the
+[plain-language learning guide](docs/LEARNING_GUIDE.md). It follows one realistic
+CoinQuest example from “what is an event?” through anomaly ensembles,
+cost-sensitive thresholds, confidence intervals, and production limitations.
+
+If you are reviewing as a senior analyst or data scientist, continue here. The
+README states the decision contract, assumptions, evidence, and failure modes;
+the learning guide explains the same system without assuming prior knowledge.
+
 ## First, build the fence
 
 Senior reviewers may reasonably map this project to something they already know.
@@ -234,7 +245,8 @@ python -m orchestration.pipeline --skip-generate
 ```
 
 A successful full run builds 14 dbt models, passes 24 dbt tests, and produces the
-anomaly and experiment artifacts. The independent Python suite contains ten tests.
+anomaly and experiment artifacts. The independent Python suite contains eighteen
+tests, including render checks for every dashboard page.
 
 ## Inspect the outputs
 
@@ -242,6 +254,7 @@ anomaly and experiment artifacts. The independent Python suite contains ten test
 |---|---|
 | [Model metrics](artifacts/anomaly/model_metrics.json) | Recommended threshold and confusion-matrix measures |
 | [Threshold evaluation](artifacts/anomaly/threshold_evaluation.csv) | Policy sensitivity and economics |
+| [Policy sensitivity](artifacts/anomaly/policy_sensitivity.csv) | Winning policy across 16 economic-assumption scenarios |
 | [Experiment summary](artifacts/experiment/experiment_summary.json) | Primary metric, retention guardrail, and economics |
 | [Country effects](artifacts/experiment/country_effects.csv) | Segment estimates and adjusted p-values |
 | [Decision memo](artifacts/experiment/recommendation.md) | Executable rollout recommendation |

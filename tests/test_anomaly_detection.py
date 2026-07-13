@@ -1,7 +1,14 @@
 import numpy as np
 import pandas as pd
+import pytest
 
-from anomaly_detection.scoring import MODEL_FEATURES, evaluate_thresholds, score_users
+from anomaly_detection.scoring import (
+    DETECTOR_WEIGHTS,
+    MODEL_FEATURES,
+    evaluate_thresholds,
+    policy_sensitivity,
+    score_users,
+)
 
 
 def mock_features(n: int = 120) -> pd.DataFrame:
@@ -27,6 +34,18 @@ def test_scores_are_bounded_and_complete() -> None:
     assert scored.loc[
         scored.risk_percentile.between(0.90, 0.95, inclusive="left"), "risk_tier"
     ].eq("high").all()
+    contributions = scored[
+        [
+            "rule_contribution",
+            "robust_z_contribution",
+            "isolation_contribution",
+            "cluster_contribution",
+        ]
+    ].sum(axis=1)
+    assert np.allclose(contributions, scored.fraud_risk_score)
+    assert scored.dominant_detector.notna().all()
+    assert scored.model_explanation.str.startswith("Main model signal:").all()
+    assert np.isclose(sum(DETECTOR_WEIGHTS.values()), 1.0)
 
 
 def test_threshold_evaluation_has_consistent_confusion_matrix() -> None:
@@ -40,3 +59,27 @@ def test_threshold_evaluation_has_consistent_confusion_matrix() -> None:
     totals = evaluation[["true_positives", "false_positives", "false_negatives", "true_negatives"]].sum(axis=1)
     assert (totals == len(features)).all()
     assert evaluation.estimated_net_savings_usd.notna().all()
+    assert evaluation.specificity.between(0, 1).all()
+    assert evaluation.f1_score.between(0, 1).all()
+
+
+def test_offline_truth_cannot_enter_scoring() -> None:
+    leaked = mock_features().assign(is_fraud=False)
+    with pytest.raises(ValueError, match="Offline truth"):
+        score_users(leaked)
+
+
+def test_policy_sensitivity_has_one_winner_per_scenario() -> None:
+    features = mock_features()
+    scored = score_users(features)
+    truth = pd.DataFrame(
+        {"user_id": features.user_id, "fraud_type": "normal", "is_fraud": False}
+    )
+    truth.loc[truth.index[-10:], ["fraud_type", "is_fraud"]] = ["reward_abuse", True]
+    sensitivity = policy_sensitivity(scored, truth)
+    winners = sensitivity[sensitivity.is_optimal_in_scenario]
+    assert len(sensitivity) == 16 * 3
+    assert len(winners) == 16
+    assert winners.groupby(
+        ["fraud_loss_horizon_multiplier", "false_positive_fixed_cost_usd"]
+    ).size().eq(1).all()

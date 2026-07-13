@@ -46,6 +46,7 @@ def load_artifacts() -> tuple[
     dict,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
     dict,
 ]:
     required = [
@@ -54,6 +55,7 @@ def load_artifacts() -> tuple[
         EXPERIMENT / "experiment_summary.json",
         EXPERIMENT / "country_effects.csv",
         ANOMALY / "feature_separation.csv",
+        ANOMALY / "policy_sensitivity.csv",
         DATA / "manifest.json",
     ]
     missing = [path for path in required if not path.exists()]
@@ -68,7 +70,8 @@ def load_artifacts() -> tuple[
         json.loads(required[2].read_text(encoding="utf-8")),
         pd.read_csv(required[3]),
         pd.read_csv(required[4]),
-        json.loads(required[5].read_text(encoding="utf-8")),
+        pd.read_csv(required[5]),
+        json.loads(required[6].read_text(encoding="utf-8")),
     )
 
 
@@ -92,6 +95,80 @@ def explain_signals(raw_explanation: str) -> str:
         SIGNAL_LABELS.get(signal.strip(), signal.strip().replace("_", " ").title())
         for signal in raw_explanation.split(",")
     )
+
+
+def render_start_here(manifest: dict) -> None:
+    page_intro(
+        "Start here: should CoinQuest stop this reward?",
+        "One realistic story explains the complete RewardLens system before the technical details.",
+    )
+    st.info(
+        "**The business problem:** stop automated reward abuse without treating unusual "
+        "but honest players as fraudsters."
+    )
+
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Maya · likely genuine player")
+        st.markdown(
+            """
+- Uses one account on one phone
+- Plays three 15-minute sessions
+- Watches four ads during gameplay
+- Claims each reward after the ad finishes
+"""
+        )
+    with right:
+        st.subheader("Emulator farm · likely abuse")
+        st.markdown(
+            """
+- Creates 300 accounts on shared virtual devices
+- Repeats sessions every few seconds
+- Claims rewards almost immediately
+- Produces nearly identical behaviour across accounts
+"""
+        )
+
+    st.subheader("How one business question becomes a data product")
+    steps = st.columns(4)
+    steps[0].markdown("**1 · Observe**\n\nRecord installs, sessions, ads and reward claims.")
+    steps[1].markdown("**2 · Summarize**\n\nTurn events into behavioural clues called features.")
+    steps[2].markdown("**3 · Rank**\n\nCombine rules and anomaly detectors into a risk rank.")
+    steps[3].markdown("**4 · Decide**\n\nChoose review or hold policies using value and user harm.")
+
+    st.warning(
+        "**Reference decision: targeted pilot only.** The balanced policy performs "
+        "best offline, but the simulated retention guardrail does not justify a global launch."
+    )
+
+    with st.expander("Explain it like I am new to data", expanded=True):
+        st.markdown(
+            """
+- An **event** is one recorded action, such as “user claimed a reward.”
+- A **feature** is a useful summary, such as “claims per active day.”
+- An **anomaly** is behaviour that differs strongly from a relevant comparison group.
+- A **risk rank of 97%** means the account ranks above 97% of this batch. It is **not** a 97% fraud probability.
+- A **false positive** is an honest user incorrectly flagged. That mistake has a customer and financial cost.
+"""
+        )
+
+    with st.expander("Show the senior data-science design"):
+        st.markdown(
+            """
+The score is an explicit ensemble of weighted rules, robust median/MAD deviations,
+Isolation Forest and DBSCAN rarity. Planted fraud labels are held in a separate
+evaluation mart and enter only after scoring. Threshold selection maximizes modeled
+net value subject to operational workload and an experimental retention guardrail.
+
+The current results are deterministic, in-sample measurements on synthetic data.
+They demonstrate system design and reasoning—not production model performance.
+"""
+        )
+        config = manifest["config"]
+        st.caption(
+            f"Reference run: {config['n_users']:,} users · {config['days']} days · "
+            f"{config['fraud_rate']:.0%} planted fraud · random seed {config['seed']}"
+        )
 
 
 def render_overview(
@@ -239,10 +316,35 @@ def render_investigation(scored: pd.DataFrame, separation: pd.DataFrame) -> None
         case_metrics[3].metric("Median claim delay", f"{case.median_claim_delay_seconds:.1f}s")
         case_metrics[4].metric("Sessions / active day", f"{case.sessions_per_active_day:.1f}")
         st.markdown(f"**Why surfaced:** {explain_signals(case.anomaly_explanation)}")
+        st.markdown(
+            f"**Model view:** {case.model_explanation} "
+            f"The largest robust deviation is {case.top_deviation_robust_z:.1f} MAD-scaled units."
+        )
         st.caption(
             "This is an explanation of triggered signals, not proof of fraud. "
             "The decision policy determines review, verification, or hold actions."
         )
+
+    contribution_data = pd.DataFrame(
+        {
+            "Detector": ["Rules", "Robust deviation", "Isolation Forest", "Cluster rarity"],
+            "Contribution": [
+                case.rule_contribution,
+                case.robust_z_contribution,
+                case.isolation_contribution,
+                case.cluster_contribution,
+            ],
+        }
+    ).sort_values("Contribution")
+    contribution_chart = px.bar(
+        contribution_data,
+        x="Contribution",
+        y="Detector",
+        orientation="h",
+        title="How each detector contributes to this account's score",
+        text_auto=".3f",
+    )
+    st.plotly_chart(clean_chart(contribution_chart, height=300), width="stretch")
 
     visible["signal_summary"] = visible.anomaly_explanation.map(explain_signals)
     table = visible[
@@ -387,7 +489,9 @@ def render_traffic_health(scored: pd.DataFrame) -> None:
     )
 
 
-def render_decision_lab(scored: pd.DataFrame, thresholds: pd.DataFrame) -> None:
+def render_decision_lab(
+    scored: pd.DataFrame, thresholds: pd.DataFrame, sensitivity: pd.DataFrame
+) -> None:
     page_intro(
         "What is the right intervention threshold?",
         "Explore operational load, then compare fixed policies using offline fraud labels and explicit cost assumptions.",
@@ -470,6 +574,67 @@ def render_decision_lab(scored: pd.DataFrame, thresholds: pd.DataFrame) -> None:
 - Re-ranking these policies under alternative costs is a required sensitivity check before deployment.
 """
         )
+
+    st.subheader("Does Balanced remain best when assumptions change?")
+    optimal = sensitivity[sensitivity.is_optimal_in_scenario].copy()
+    optimal["Policy"] = optimal.threshold.str.title()
+    stability = (
+        optimal.Policy.value_counts()
+        .rename_axis("Policy")
+        .reset_index(name="Scenarios won")
+    )
+    stability["Share of 16 scenarios"] = stability["Scenarios won"] / len(optimal)
+    stability_cols = st.columns([1, 1.5])
+    stability_cols[0].dataframe(
+        stability,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Share of 16 scenarios": st.column_config.NumberColumn(format="percent")
+        },
+    )
+    matrix = optimal.pivot(
+        index="false_positive_fixed_cost_usd",
+        columns="fraud_loss_horizon_multiplier",
+        values="Policy",
+    )
+    policy_codes = {"Conservative": 0, "Balanced": 1, "Aggressive": 2}
+    policy_code = matrix.apply(lambda column: column.map(policy_codes)).astype(int)
+    heatmap = px.imshow(
+        policy_code,
+        aspect="auto",
+        labels={
+            "x": "Fraud-loss projection horizon (multiples)",
+            "y": "Fixed cost per false positive (USD)",
+            "color": "Winning policy",
+        },
+        color_continuous_scale=[
+            [0, "#2563EB"],
+            [0.5, "#0F766E"],
+            [1, "#C2410C"],
+        ],
+        range_color=[0, 2],
+    )
+    for row_value in matrix.index:
+        for column_value in matrix.columns:
+            heatmap.add_annotation(
+                x=column_value,
+                y=row_value,
+                text=matrix.loc[row_value, column_value],
+                showarrow=False,
+                font=dict(color="white"),
+            )
+    heatmap.update_coloraxes(
+        colorbar=dict(
+            tickvals=[0, 1, 2],
+            ticktext=["Conservative", "Balanced", "Aggressive"],
+        )
+    )
+    stability_cols[1].plotly_chart(clean_chart(heatmap, height=360), width="stretch")
+    st.caption(
+        "Sensitivity analysis varies the fraud-loss horizon and fixed false-positive cost. "
+        "A recommendation that changes easily should be treated as assumption-sensitive."
+    )
 
 
 def render_experiment(experiment: dict, countries: pd.DataFrame) -> None:
@@ -566,7 +731,7 @@ def render_experiment(experiment: dict, countries: pd.DataFrame) -> None:
 
 
 try:
-    scored, thresholds, experiment, countries, separation, manifest = load_artifacts()
+    scored, thresholds, experiment, countries, separation, sensitivity, manifest = load_artifacts()
 except FileNotFoundError as error:
     st.error(str(error))
     st.stop()
@@ -576,6 +741,7 @@ st.sidebar.caption("Post-install reward integrity decision lab")
 page = st.sidebar.radio(
     "Navigate",
     [
+        "0 · Start here",
         "1 · Decision overview",
         "2 · Investigation queue",
         "3 · Traffic health",
@@ -591,13 +757,15 @@ st.sidebar.caption(
     "Evaluation labels are isolated from scoring features."
 )
 
-if page == "1 · Decision overview":
+if page == "0 · Start here":
+    render_start_here(manifest)
+elif page == "1 · Decision overview":
     render_overview(scored, thresholds, manifest)
 elif page == "2 · Investigation queue":
     render_investigation(scored, separation)
 elif page == "3 · Traffic health":
     render_traffic_health(scored)
 elif page == "4 · Threshold decision lab":
-    render_decision_lab(scored, thresholds)
+    render_decision_lab(scored, thresholds, sensitivity)
 else:
     render_experiment(experiment, countries)

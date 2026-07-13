@@ -41,6 +41,26 @@ MODEL_FEATURES = [
     "claim_delay_peer_zscore",
 ]
 
+FORBIDDEN_SCORING_COLUMNS = {"is_fraud", "fraud_type"}
+
+RULE_WEIGHTS = {
+    "shared_device": 0.22,
+    "emulator": 0.15,
+    "rooted": 0.07,
+    "instant_claims": 0.18,
+    "high_frequency": 0.14,
+    "low_gameplay": 0.08,
+    "high_reward_volume": 0.10,
+    "peer_outlier": 0.06,
+}
+
+DETECTOR_WEIGHTS = {
+    "rule_score": 0.34,
+    "robust_z_score": 0.24,
+    "isolation_score": 0.32,
+    "cluster_score": 0.10,
+}
+
 THRESHOLDS = {
     "conservative": 0.95,
     "balanced": 0.90,
@@ -54,6 +74,34 @@ class ScoringConfig:
     isolation_contamination: float = 0.10
     dbscan_eps: float = 2.8
     dbscan_min_samples: int = 12
+
+
+@dataclass(frozen=True)
+class EconomicConfig:
+    """Illustrative policy economics; production values require owner sign-off."""
+
+    fraud_loss_horizon_multiplier: float = 4.0
+    false_positive_fixed_cost_usd: float = 0.35
+    false_positive_revenue_multiplier: float = 1.5
+
+
+def validate_scoring_frame(frame: pd.DataFrame) -> None:
+    """Fail fast when the scoring contract or leakage boundary is violated."""
+
+    missing = sorted(set(MODEL_FEATURES + ["user_id"]) - set(frame.columns))
+    if missing:
+        raise ValueError(f"Scoring frame is missing required columns: {missing}")
+    leaked = sorted(FORBIDDEN_SCORING_COLUMNS & set(frame.columns))
+    if leaked:
+        raise ValueError(f"Offline truth must not enter scoring: {leaked}")
+    if frame.empty:
+        raise ValueError("Scoring frame must contain at least one user")
+    if frame.user_id.isna().any() or frame.user_id.duplicated().any():
+        raise ValueError("user_id must be present and unique at scoring time")
+    if not np.isclose(sum(RULE_WEIGHTS.values()), 1.0):
+        raise ValueError("Rule weights must sum to 1.0")
+    if not np.isclose(sum(DETECTOR_WEIGHTS.values()), 1.0):
+        raise ValueError("Detector weights must sum to 1.0")
 
 
 def load_features(database: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -90,19 +138,7 @@ def rule_scores(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
         .ge(2.5)
         .astype(float)
     )
-    weights = pd.Series(
-        {
-            "shared_device": 0.22,
-            "emulator": 0.15,
-            "rooted": 0.07,
-            "instant_claims": 0.18,
-            "high_frequency": 0.14,
-            "low_gameplay": 0.08,
-            "high_reward_volume": 0.10,
-            "peer_outlier": 0.06,
-        }
-    )
-    score = rules.mul(weights).sum(axis=1)
+    score = rules.mul(pd.Series(RULE_WEIGHTS)).sum(axis=1)
     explanations = rules.apply(
         lambda row: ", ".join(name for name, active in row.items() if active) or "no hard rule",
         axis=1,
@@ -110,24 +146,38 @@ def rule_scores(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     return score, explanations
 
 
-def robust_z_scores(frame: pd.DataFrame) -> pd.Series:
+def robust_z_details(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Return cohort-relative score plus the most unusual feature per user."""
+
     values = frame[MODEL_FEATURES].replace([np.inf, -np.inf], np.nan)
     median = values.median()
     mad = (values - median).abs().median().replace(0, 1.0)
-    absolute_z = ((values - median) / (1.4826 * mad)).abs().clip(upper=20)
+    absolute_z = ((values - median) / (1.4826 * mad)).abs().clip(upper=20).fillna(0)
     top_count = min(5, absolute_z.shape[1])
     raw = np.sort(absolute_z.to_numpy(), axis=1)[:, -top_count:].mean(axis=1)
-    return percentile_score(raw)
+    top_feature = absolute_z.idxmax(axis=1)
+    top_value = absolute_z.max(axis=1)
+    return percentile_score(raw), top_feature, top_value
+
+
+def robust_z_scores(frame: pd.DataFrame) -> pd.Series:
+    """Backward-compatible convenience wrapper used by analytical notebooks."""
+
+    return robust_z_details(frame)[0]
 
 
 def score_users(
     frame: pd.DataFrame, config: ScoringConfig = ScoringConfig()
 ) -> pd.DataFrame:
+    validate_scoring_frame(frame)
     scored = frame.copy()
     matrix = frame[MODEL_FEATURES].replace([np.inf, -np.inf], np.nan)
     rule_score, explanations = rule_scores(frame)
     scored["rule_score"] = rule_score
-    scored["robust_z_score"] = robust_z_scores(frame).to_numpy()
+    robust_score, top_feature, top_robust_z = robust_z_details(frame)
+    scored["robust_z_score"] = robust_score.to_numpy()
+    scored["top_deviation_feature"] = top_feature.to_numpy()
+    scored["top_deviation_robust_z"] = top_robust_z.to_numpy()
 
     isolation = make_pipeline(
         SimpleImputer(strategy="median"),
@@ -164,12 +214,21 @@ def score_users(
     scored["cluster_id"] = labels
     scored["cluster_score"] = percentile_score(rarity).to_numpy()
 
-    scored["fraud_risk_score"] = (
-        0.34 * scored.rule_score
-        + 0.24 * scored.robust_z_score
-        + 0.32 * scored.isolation_score
-        + 0.10 * scored.cluster_score
-    ).clip(0, 1)
+    contribution_columns = []
+    for detector, weight in DETECTOR_WEIGHTS.items():
+        contribution = detector.replace("_score", "_contribution")
+        scored[contribution] = scored[detector] * weight
+        contribution_columns.append(contribution)
+    scored["fraud_risk_score"] = scored[contribution_columns].sum(axis=1).clip(0, 1)
+    detector_labels = {
+        "rule_contribution": "known behavioural rules",
+        "robust_z_contribution": "unusual feature values",
+        "isolation_contribution": "rare multivariate behaviour",
+        "cluster_contribution": "cluster rarity",
+    }
+    scored["dominant_detector"] = (
+        scored[contribution_columns].idxmax(axis=1).map(detector_labels)
+    )
     scored["risk_percentile"] = percentile_score(scored.fraud_risk_score).to_numpy()
     scored["risk_tier"] = pd.cut(
         scored.risk_percentile,
@@ -179,10 +238,21 @@ def score_users(
         right=False,
     ).astype(str)
     scored["anomaly_explanation"] = explanations
+    scored["model_explanation"] = (
+        "Main model signal: "
+        + scored.dominant_detector
+        + "; largest robust deviation: "
+        + scored.top_deviation_feature.str.replace("_", " ")
+        + "."
+    )
     return scored
 
 
-def evaluate_thresholds(scored: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
+def evaluate_thresholds(
+    scored: pd.DataFrame,
+    truth: pd.DataFrame,
+    economics: EconomicConfig = EconomicConfig(),
+) -> pd.DataFrame:
     evaluated = scored.merge(truth, on="user_id", validate="one_to_one")
     rows: list[dict[str, float | str | int]] = []
     for name, cutoff in THRESHOLDS.items():
@@ -193,14 +263,17 @@ def evaluate_thresholds(scored: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFra
         fn = int((~predicted & actual).sum())
         tn = int((~predicted & ~actual).sum())
         prevented_loss = float(
-            evaluated.loc[predicted & actual, "reward_cost_usd"].sum() * 4.0
+            evaluated.loc[predicted & actual, "reward_cost_usd"].sum()
+            * economics.fraud_loss_horizon_multiplier
         )
         false_positive_cost = float(
             (
-                0.35
-                + evaluated.loc[predicted & ~actual, "ad_revenue_usd"] * 1.5
+                economics.false_positive_fixed_cost_usd
+                + evaluated.loc[predicted & ~actual, "ad_revenue_usd"]
+                * economics.false_positive_revenue_multiplier
             ).sum()
         )
+        flagged = max(tp + fp, 1)
         rows.append(
             {
                 "threshold": name,
@@ -213,12 +286,38 @@ def evaluate_thresholds(scored: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFra
                 "precision": tp / max(tp + fp, 1),
                 "recall": tp / max(tp + fn, 1),
                 "false_positive_rate": fp / max(fp + tn, 1),
+                "specificity": tn / max(tn + fp, 1),
+                "f1_score": 2 * tp / max(2 * tp + fp + fn, 1),
+                "alerts_per_1000_users": predicted.mean() * 1000,
                 "prevented_loss_usd": prevented_loss,
                 "false_positive_cost_usd": false_positive_cost,
                 "estimated_net_savings_usd": prevented_loss - false_positive_cost,
+                "net_savings_per_flagged_user_usd": (
+                    prevented_loss - false_positive_cost
+                )
+                / flagged,
             }
         )
     return pd.DataFrame(rows)
+
+
+def policy_sensitivity(scored: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
+    """Stress-test the recommended policy across plausible cost assumptions."""
+
+    rows: list[pd.DataFrame] = []
+    for horizon in (1.0, 2.0, 4.0, 8.0):
+        for fixed_cost in (0.10, 0.35, 1.00, 2.00):
+            economics = EconomicConfig(
+                fraud_loss_horizon_multiplier=horizon,
+                false_positive_fixed_cost_usd=fixed_cost,
+            )
+            evaluated = evaluate_thresholds(scored, truth, economics)
+            evaluated["fraud_loss_horizon_multiplier"] = horizon
+            evaluated["false_positive_fixed_cost_usd"] = fixed_cost
+            best_index = evaluated.estimated_net_savings_usd.idxmax()
+            evaluated["is_optimal_in_scenario"] = evaluated.index == best_index
+            rows.append(evaluated)
+    return pd.concat(rows, ignore_index=True)
 
 
 def feature_separation(scored: pd.DataFrame) -> pd.DataFrame:
@@ -240,16 +339,21 @@ def run_scoring(database: Path, output_dir: Path, seed: int = 42) -> dict[str, o
     features, truth = load_features(database)
     scored = score_users(features, ScoringConfig(seed=seed))
     evaluation = evaluate_thresholds(scored, truth)
+    sensitivity = policy_sensitivity(scored, truth)
     separation = feature_separation(scored)
     output_dir.mkdir(parents=True, exist_ok=True)
     scored.to_parquet(output_dir / "scored_users.parquet", index=False)
     evaluation.to_csv(output_dir / "threshold_evaluation.csv", index=False)
+    sensitivity.to_csv(output_dir / "policy_sensitivity.csv", index=False)
     separation.to_csv(output_dir / "feature_separation.csv", index=False)
 
     best = evaluation.loc[evaluation.estimated_net_savings_usd.idxmax()].to_dict()
     metrics: dict[str, object] = {
         "users_scored": len(scored),
         "model_features": MODEL_FEATURES,
+        "rule_weights": RULE_WEIGHTS,
+        "detector_weights": DETECTOR_WEIGHTS,
+        "economic_config": EconomicConfig().__dict__,
         "recommended_threshold": best["threshold"],
         "recommended_threshold_metrics": best,
     }
