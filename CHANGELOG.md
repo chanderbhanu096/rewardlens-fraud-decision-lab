@@ -3,6 +3,13 @@
 All notable RewardLens changes are documented here. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-07-13
+
+### Fixed
+
+- Made the experiment cost KPI currency explicit without dollar-sign math
+  delimiters, preventing Streamlit from rendering the value ambiguously.
+
 ## [1.1.0] — 2026-07-13
 
 ### Added
@@ -54,5 +61,6 @@ All notable RewardLens changes are documented here. The project follows
 - The experiment recommendation remains a targeted pilot only because the
   retention non-inferiority guardrail did not pass.
 
+[1.1.1]: https://github.com/chanderbhanu096/rewardlens-fraud-decision-lab/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/chanderbhanu096/rewardlens-fraud-decision-lab/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/chanderbhanu096/rewardlens-fraud-decision-lab/releases/tag/v1.0.0
