@@ -1,0 +1,29 @@
+{
+  "generated_at": "2026-07-13T18:24:05.296014+00:00",
+  "config": {
+    "n_users": 10000,
+    "days": 30,
+    "seed": 42,
+    "start_date": "2025-01-01",
+    "fraud_rate": 0.09
+  },
+  "row_counts": {
+    "users": 10000,
+    "devices": 9093,
+    "user_devices": 10000,
+    "installs": 10000,
+    "sessions": 259953,
+    "ad_events": 445753,
+    "reward_claims": 381320,
+    "experiment_assignments": 10000
+  },
+  "fraud_prevalence": 0.09,
+  "fraud_type_counts": {
+    "normal": 9100,
+    "reward_abuse": 335,
+    "emulator_farm": 330,
+    "click_farm": 235
+  },
+  "max_users_on_one_device": 67,
+  "median_claim_delay_seconds": 2.983
+}

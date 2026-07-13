@@ -1,0 +1,7 @@
+rewardlens:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "../data/rewardlens.duckdb"
+      threads: 4

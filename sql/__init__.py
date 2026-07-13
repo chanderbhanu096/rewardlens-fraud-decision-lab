@@ -1,0 +1,2 @@
+"""DuckDB ingestion utilities."""
+

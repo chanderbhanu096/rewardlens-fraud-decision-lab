@@ -1,0 +1,20 @@
+name: rewardlens
+version: "1.0.0"
+config-version: 2
+
+profile: rewardlens
+model-paths: ["models"]
+test-paths: ["tests"]
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  rewardlens:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: table
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: analytics

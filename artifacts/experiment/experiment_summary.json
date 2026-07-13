@@ -1,0 +1,42 @@
+{
+  "sample_size": 10000,
+  "variant_counts": {
+    "control": 5001,
+    "treatment": 4999
+  },
+  "primary_metric": {
+    "metric": "fraud_reward_paid_usd_per_assigned_user",
+    "control_mean": 0.6481503699260127,
+    "treatment_mean": 0.1491374674934982,
+    "absolute_effect": -0.4990129024325145,
+    "relative_effect": -0.7699029817563439,
+    "p_value": 1.8493791414328522e-39,
+    "control_total": 3241.3999999999896,
+    "treatment_total": 745.5381999999976
+  },
+  "retention_guardrail": {
+    "control_rate": 0.5644871025794841,
+    "treatment_rate": 0.5451090218043608,
+    "absolute_effect": -0.019378080775123263,
+    "relative_effect": -0.034328651064963314,
+    "ci_low": -0.03885632044303883,
+    "ci_high": 0.00010015889279230486,
+    "p_value": 0.05122946962925161
+  },
+  "retention_noninferiority": {
+    "margin": -0.02,
+    "ci_low": -0.03885632044303883,
+    "met": false
+  },
+  "economics": {
+    "prevented_fraud_loss_usd": 2643.2717999999923,
+    "legitimate_reward_blocked_usd": 13.315200000000006,
+    "user_friction_cost_usd": 18.2,
+    "net_value_usd_in_sample": 2611.756599999992
+  },
+  "misleading_metric_warning": {
+    "metric": "reward_claims among flagged treatment users",
+    "why_misleading": "It conditions on a post-assignment risk group and ignores retention and legitimate-user costs."
+  },
+  "decision": "targeted_pilot_only"
+}

@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: stg_users
+    columns:
+      - name: user_id
+        data_tests: [not_null, unique]
+      - name: fraud_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [normal, reward_abuse, emulator_farm, click_farm]
+  - name: stg_devices
+    columns:
+      - name: device_id
+        data_tests: [not_null, unique]
+  - name: stg_installs
+    columns:
+      - name: install_id
+        data_tests: [not_null, unique]
+      - name: user_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: user_id
+  - name: stg_sessions
+    columns:
+      - name: session_id
+        data_tests: [not_null, unique]
+  - name: stg_ad_events
+    columns:
+      - name: ad_event_id
+        data_tests: [not_null, unique]
+      - name: session_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_sessions')
+                field: session_id
+  - name: stg_reward_claims
+    columns:
+      - name: reward_claim_id
+        data_tests: [not_null, unique]
+      - name: ad_event_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_ad_events')
+                field: ad_event_id
+  - name: mart_user_features
+    columns:
+      - name: user_id
+        data_tests: [not_null, unique]
+      - name: reward_claim_rate
+        data_tests: [not_null]
+  - name: mart_evaluation_truth
+    columns:
+      - name: user_id
+        data_tests: [not_null, unique]

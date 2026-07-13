@@ -1,0 +1,100 @@
+{
+  "completed_at": "2026-07-13T18:46:21.670446+00:00",
+  "generation": {
+    "status": "reused existing generated files"
+  },
+  "ingestion": {
+    "users": 10000,
+    "devices": 9093,
+    "user_devices": 10000,
+    "installs": 10000,
+    "sessions": 259953,
+    "ad_events": 445753,
+    "reward_claims": 381320,
+    "experiment_assignments": 10000
+  },
+  "model": {
+    "users_scored": 10000,
+    "model_features": [
+      "users_on_device",
+      "account_creation_span_hours",
+      "session_count",
+      "active_days",
+      "sessions_per_active_day",
+      "avg_session_seconds",
+      "stddev_session_seconds",
+      "total_level_gain",
+      "avg_level_gain",
+      "distinct_session_hours",
+      "ad_views",
+      "ad_completion_rate",
+      "reward_claims",
+      "reward_claim_rate",
+      "median_claim_delay_seconds",
+      "p10_claim_delay_seconds",
+      "instant_claim_rate",
+      "net_reward_loss_usd",
+      "sessions_peer_zscore",
+      "claim_rate_peer_zscore",
+      "claim_delay_peer_zscore"
+    ],
+    "recommended_threshold": "balanced",
+    "recommended_threshold_metrics": {
+      "threshold": "balanced",
+      "risk_percentile_cutoff": 0.9,
+      "flagged_users": 1001,
+      "true_positives": 900,
+      "false_positives": 101,
+      "false_negatives": 0,
+      "true_negatives": 8999,
+      "precision": 0.8991008991008991,
+      "recall": 1.0,
+      "false_positive_rate": 0.011098901098901099,
+      "prevented_loss_usd": 26520.839999999913,
+      "false_positive_cost_usd": 142.15370499999997,
+      "estimated_net_savings_usd": 26378.686294999912
+    }
+  },
+  "experiment": {
+    "sample_size": 10000,
+    "variant_counts": {
+      "control": 5001,
+      "treatment": 4999
+    },
+    "primary_metric": {
+      "metric": "fraud_reward_paid_usd_per_assigned_user",
+      "control_mean": 0.6481503699260127,
+      "treatment_mean": 0.1491374674934982,
+      "absolute_effect": -0.4990129024325145,
+      "relative_effect": -0.7699029817563439,
+      "p_value": 1.8493791414328522e-39,
+      "control_total": 3241.3999999999896,
+      "treatment_total": 745.5381999999976
+    },
+    "retention_guardrail": {
+      "control_rate": 0.5644871025794841,
+      "treatment_rate": 0.5451090218043608,
+      "absolute_effect": -0.019378080775123263,
+      "relative_effect": -0.034328651064963314,
+      "ci_low": -0.03885632044303883,
+      "ci_high": 0.00010015889279230486,
+      "p_value": 0.05122946962925161
+    },
+    "retention_noninferiority": {
+      "margin": -0.02,
+      "ci_low": -0.03885632044303883,
+      "met": false
+    },
+    "economics": {
+      "prevented_fraud_loss_usd": 2643.2717999999923,
+      "legitimate_reward_blocked_usd": 13.315200000000006,
+      "user_friction_cost_usd": 18.2,
+      "net_value_usd_in_sample": 2611.756599999992
+    },
+    "misleading_metric_warning": {
+      "metric": "reward_claims among flagged treatment users",
+      "why_misleading": "It conditions on a post-assignment risk group and ignores retention and legitimate-user costs."
+    },
+    "decision": "targeted_pilot_only"
+  }
+}

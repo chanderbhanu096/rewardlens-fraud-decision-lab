@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: users
+      - name: devices
+      - name: user_devices
+      - name: installs
+      - name: sessions
+      - name: ad_events
+      - name: reward_claims
+      - name: experiment_assignments
+
