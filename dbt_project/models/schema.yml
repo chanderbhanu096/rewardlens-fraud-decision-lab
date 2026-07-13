@@ -58,3 +58,22 @@ models:
     columns:
       - name: user_id
         data_tests: [not_null, unique]
+  - name: mart_source_daily_health
+    description: Daily publisher and campaign reward timing with a prior-seven-day baseline.
+    columns:
+      - name: activity_date
+        data_tests: [not_null]
+      - name: source_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [publisher, campaign]
+      - name: source_id
+        data_tests: [not_null]
+      - name: reward_claims
+        data_tests: [not_null]
+      - name: instant_claim_rate
+        data_tests: [not_null]
+      - name: prior_observed_days
+        description: Number of earlier source-days available, capped at seven.

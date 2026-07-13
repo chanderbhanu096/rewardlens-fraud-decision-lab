@@ -1,5 +1,6 @@
 {
   "users_scored": 10000,
+  "source_health_rows": 1116,
   "model_features": [
     "users_on_device",
     "account_creation_span_hours",

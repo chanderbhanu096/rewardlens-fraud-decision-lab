@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rewardlens"
-version = "1.0.0"
+version = "1.1.0"
 description = "Synthetic post-install reward integrity decision lab"
 requires-python = ">=3.11"
 dependencies = [
@@ -31,6 +31,7 @@ rewardlens-generate = "data_generator.generate:main"
 [tool.setuptools.packages.find]
 include = [
   "anomaly_detection*",
+  "dashboard*",
   "data_generator*",
   "experiment_analysis*",
   "orchestration*",

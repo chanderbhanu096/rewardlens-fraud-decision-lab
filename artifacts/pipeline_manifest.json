@@ -1,5 +1,5 @@
 {
-  "completed_at": "2026-07-13T19:31:08.069679+00:00",
+  "completed_at": "2026-07-13T21:23:21.166425+00:00",
   "generation": {
     "status": "reused existing generated files"
   },
@@ -15,6 +15,7 @@
   },
   "model": {
     "users_scored": 10000,
+    "source_health_rows": 1116,
     "model_features": [
       "users_on_device",
       "account_creation_span_hours",
