@@ -104,7 +104,7 @@ def validate_scoring_frame(frame: pd.DataFrame) -> None:
         raise ValueError("Detector weights must sum to 1.0")
 
 
-def load_features(database: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def load_features(database: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     with duckdb.connect(str(database), read_only=True) as connection:
         features = connection.execute(
             "select * from analytics.mart_user_population_comparison"
@@ -112,7 +112,10 @@ def load_features(database: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         truth = connection.execute(
             "select * from analytics.mart_evaluation_truth"
         ).fetch_df()
-    return features, truth
+        source_health = connection.execute(
+            "select * from analytics.mart_source_daily_health"
+        ).fetch_df()
+    return features, truth, source_health
 
 
 def percentile_score(values: np.ndarray | pd.Series) -> pd.Series:
@@ -320,8 +323,10 @@ def policy_sensitivity(scored: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFram
     return pd.concat(rows, ignore_index=True)
 
 
-def feature_separation(scored: pd.DataFrame) -> pd.DataFrame:
-    flagged = scored.risk_percentile >= THRESHOLDS["balanced"]
+def feature_separation(
+    scored: pd.DataFrame, cutoff: float = THRESHOLDS["balanced"]
+) -> pd.DataFrame:
+    flagged = scored.risk_percentile >= cutoff
     rows = []
     for feature in MODEL_FEATURES:
         overall_std = scored[feature].std()
@@ -336,20 +341,22 @@ def feature_separation(scored: pd.DataFrame) -> pd.DataFrame:
 
 
 def run_scoring(database: Path, output_dir: Path, seed: int = 42) -> dict[str, object]:
-    features, truth = load_features(database)
+    features, truth, source_health = load_features(database)
     scored = score_users(features, ScoringConfig(seed=seed))
     evaluation = evaluate_thresholds(scored, truth)
     sensitivity = policy_sensitivity(scored, truth)
-    separation = feature_separation(scored)
+    best = evaluation.loc[evaluation.estimated_net_savings_usd.idxmax()].to_dict()
+    separation = feature_separation(scored, float(best["risk_percentile_cutoff"]))
     output_dir.mkdir(parents=True, exist_ok=True)
     scored.to_parquet(output_dir / "scored_users.parquet", index=False)
     evaluation.to_csv(output_dir / "threshold_evaluation.csv", index=False)
     sensitivity.to_csv(output_dir / "policy_sensitivity.csv", index=False)
     separation.to_csv(output_dir / "feature_separation.csv", index=False)
+    source_health.to_parquet(output_dir / "source_daily_health.parquet", index=False)
 
-    best = evaluation.loc[evaluation.estimated_net_savings_usd.idxmax()].to_dict()
     metrics: dict[str, object] = {
         "users_scored": len(scored),
+        "source_health_rows": len(source_health),
         "model_features": MODEL_FEATURES,
         "rule_weights": RULE_WEIGHTS,
         "detector_weights": DETECTOR_WEIGHTS,

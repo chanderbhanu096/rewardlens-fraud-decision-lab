@@ -31,7 +31,13 @@ modeled financial value in one operating decision.
 
 [![RewardLens threshold decision lab](assets/screenshots/rewardlens-threshold-lab.jpg)](https://rewardlens-fraud-lab.streamlit.app/)
 
-Both screenshots link directly to the public application.
+The traffic-health view adds a daily, source-specific signal against a baseline
+computed from the source's prior seven observed days only. That as-of-time rule
+prevents the day being evaluated from leaking into its own benchmark.
+
+[![RewardLens traffic health dashboard](assets/screenshots/rewardlens-traffic-health.jpg)](https://rewardlens-fraud-lab.streamlit.app/)
+
+Each screenshot links directly to the public application.
 
 ## Choose your depth
 
@@ -144,7 +150,7 @@ not rollout evidence.
 ```mermaid
 flowchart LR
     A["8 synthetic event tables"] --> B["DuckDB raw layer"]
-    B --> C["14 dbt models"]
+    B --> C["15 dbt models"]
     C --> D["21 behavioural features"]
     D --> E["Rules"]
     D --> F["Robust z-scores"]
@@ -264,9 +270,9 @@ files while rebuilding analytics and artifacts:
 python -m orchestration.pipeline --skip-generate
 ```
 
-A successful full run builds 14 dbt models, passes 24 dbt tests, and produces the
-anomaly and experiment artifacts. The independent Python suite contains eighteen
-tests, including render checks for every dashboard page.
+A successful full run builds 15 dbt models, passes 32 dbt tests, and produces the
+anomaly and experiment artifacts. The independent Python suite contains 26 tests,
+including chart-semantics and render checks for every dashboard page.
 
 ## Inspect the outputs
 
@@ -275,6 +281,7 @@ tests, including render checks for every dashboard page.
 | [Model metrics](artifacts/anomaly/model_metrics.json) | Recommended threshold and confusion-matrix measures |
 | [Threshold evaluation](artifacts/anomaly/threshold_evaluation.csv) | Policy sensitivity and economics |
 | [Policy sensitivity](artifacts/anomaly/policy_sensitivity.csv) | Winning policy across 16 economic-assumption scenarios |
+| [Source daily health](artifacts/anomaly/source_daily_health.parquet) | Publisher/campaign reward timing with leakage-safe prior baselines |
 | [Experiment summary](artifacts/experiment/experiment_summary.json) | Primary metric, retention guardrail, and economics |
 | [Country effects](artifacts/experiment/country_effects.csv) | Segment estimates and adjusted p-values |
 | [Decision memo](artifacts/experiment/recommendation.md) | Executable rollout recommendation |
@@ -290,8 +297,8 @@ tests, including render checks for every dashboard page.
 | `anomaly_detection/` | Multi-method scoring and threshold economics |
 | `experiment_analysis/` | Simulated outcomes, inference, and segment analysis |
 | `orchestration/` | End-to-end Prefect flow |
-| `dashboard/` | Decision-oriented Streamlit interface |
-| `tests/` | Generator, scoring, and experiment validation |
+| `dashboard/` | Decision-oriented Streamlit interface and tested chart builders |
+| `tests/` | Generator, scoring, experiment, dashboard, and chart validation |
 | `architecture/` | System-design documentation |
 | `assets/screenshots/` | Verified dashboard images used in this README |
 

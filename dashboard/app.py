@@ -3,27 +3,42 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from dashboard.charts import (
+    detector_contribution_chart,
+    experiment_value_waterfall,
+    feature_separation_chart,
+    policy_sensitivity_chart,
+    policy_tradeoff_chart,
+    priority_review_policy,
+    recommended_policy,
+    retention_forest_chart,
+    risk_distribution_chart,
+    source_review_share_chart,
+    source_trend_chart,
+    threshold_workload_chart,
+    traffic_priority_chart,
+)
+
+
 ANOMALY = ROOT / "artifacts" / "anomaly"
 EXPERIMENT = ROOT / "artifacts" / "experiment"
 DATA = ROOT / "data" / "generated"
-
-BALANCED_CUTOFF = 0.90
-CRITICAL_CUTOFF = 0.95
 
 SIGNAL_LABELS = {
     "shared_device": "≥8 accounts share this device",
     "emulator": "Emulator indicator",
     "rooted": "Rooted or jailbroken indicator",
-    "instant_claims": "≥45% of claims occur within 3 seconds",
+    "instant_claims": "≥45% of claims occur in under 3 seconds",
     "high_frequency": "≥5 sessions per active day",
     "low_gameplay": "≤0.25 levels gained per session",
     "high_reward_volume": "Reward claims are in the top 10%",
@@ -47,6 +62,7 @@ def load_artifacts() -> tuple[
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
     dict,
 ]:
     required = [
@@ -56,6 +72,7 @@ def load_artifacts() -> tuple[
         EXPERIMENT / "country_effects.csv",
         ANOMALY / "feature_separation.csv",
         ANOMALY / "policy_sensitivity.csv",
+        ANOMALY / "source_daily_health.parquet",
         DATA / "manifest.json",
     ]
     missing = [path for path in required if not path.exists()]
@@ -71,18 +88,9 @@ def load_artifacts() -> tuple[
         pd.read_csv(required[3]),
         pd.read_csv(required[4]),
         pd.read_csv(required[5]),
-        json.loads(required[6].read_text(encoding="utf-8")),
+        pd.read_parquet(required[6]),
+        json.loads(required[7].read_text(encoding="utf-8")),
     )
-
-
-def clean_chart(figure: go.Figure, *, height: int = 390) -> go.Figure:
-    figure.update_layout(
-        height=height,
-        margin=dict(l=12, r=12, t=48, b=12),
-        legend_title_text="",
-        hoverlabel=dict(namelength=-1),
-    )
-    return figure
 
 
 def page_intro(question: str, description: str) -> None:
@@ -97,7 +105,7 @@ def explain_signals(raw_explanation: str) -> str:
     )
 
 
-def render_start_here(manifest: dict) -> None:
+def render_start_here(manifest: dict, recommendation_name: str) -> None:
     page_intro(
         "Start here: should CoinQuest stop this reward?",
         "One realistic story explains the complete RewardLens system before the technical details.",
@@ -137,8 +145,9 @@ def render_start_here(manifest: dict) -> None:
     steps[3].markdown("**4 · Decide**\n\nChoose review or hold policies using value and user harm.")
 
     st.warning(
-        "**Reference decision: targeted pilot only.** The balanced policy performs "
-        "best offline, but the simulated retention guardrail does not justify a global launch."
+        f"**Reference decision: targeted pilot only.** The {recommendation_name} policy "
+        "performs best offline, but the simulated retention guardrail does not justify "
+        "a global launch."
     )
 
     with st.expander("Explain it like I am new to data", expanded=True):
@@ -147,8 +156,10 @@ def render_start_here(manifest: dict) -> None:
 - An **event** is one recorded action, such as “user claimed a reward.”
 - A **feature** is a useful summary, such as “claims per active day.”
 - An **anomaly** is behaviour that differs strongly from a relevant comparison group.
-- A **risk rank of 97%** means the account ranks above 97% of this batch. It is **not** a 97% fraud probability.
-- A **false positive** is an honest user incorrectly flagged. That mistake has a customer and financial cost.
+- A **risk rank of 97%** means the account ranks above 97% of this batch. It is
+  **not** a 97% fraud probability.
+- A **false positive** is an honest user incorrectly flagged. That mistake has a
+  customer and financial cost.
 """
         )
 
@@ -178,12 +189,16 @@ def render_overview(
         "Where should RewardLens intervene?",
         "A decision view of post-install abuse, customer risk, and expected value.",
     )
-    balanced = thresholds.loc[thresholds.threshold.eq("balanced")].iloc[0]
-    review_queue = scored.risk_percentile.ge(BALANCED_CUTOFF)
+    recommendation = recommended_policy(thresholds)
+    priority = priority_review_policy(thresholds)
+    review_cutoff = float(recommendation.risk_percentile_cutoff)
+    priority_cutoff = float(priority.risk_percentile_cutoff)
+    review_queue = scored.risk_percentile.ge(review_cutoff)
 
     st.success(
-        "Recommended operating point: **Balanced** — review the top-ranked 10% "
-        "and reserve automatic holds for the top-ranked 5%."
+        f"Recommended offline operating point: **{recommendation.threshold.title()}** — "
+        f"review the top-ranked {1 - review_cutoff:.0%} and route the top-ranked "
+        f"{1 - priority_cutoff:.0%} to priority review."
     )
     metrics = st.columns(4)
     metrics[0].metric(
@@ -194,72 +209,67 @@ def render_overview(
     metrics[1].metric(
         f"Review queue ({review_queue.mean():.1%})",
         f"{int(review_queue.sum()):,}",
-        help="Users at or above the 90th risk percentile.",
+        help=f"Users at or above the {review_cutoff:.0%} risk-rank cutoff.",
     )
     metrics[2].metric(
         "Offline precision",
-        f"{balanced.precision:.1%}",
+        f"{recommendation.precision:.1%}",
         help=(
-            f"Recall {balanced.recall:.1%}; false-positive rate "
-            f"{balanced.false_positive_rate:.1%}. In-sample evaluation against "
+            f"Recall {recommendation.recall:.1%}; false-positive rate "
+            f"{recommendation.false_positive_rate:.1%}. In-sample evaluation against "
             "planted synthetic truth."
         ),
     )
     metrics[3].metric(
         "Scenario savings",
-        f"${balanced.estimated_net_savings_usd:,.0f}",
+        f"${recommendation.estimated_net_savings_usd:,.0f}",
         help="Four-window projected fraud loss prevented minus modeled legitimate-user friction.",
     )
 
-    left, right = st.columns([1.2, 1])
-    score_cutoff = scored.loc[review_queue, "fraud_risk_score"].min()
-    distribution = px.histogram(
-        scored,
-        x="fraud_risk_score",
-        nbins=45,
-        title="Risk-score distribution",
-        labels={"fraud_risk_score": "Combined fraud-risk score", "count": "Users"},
+    st.plotly_chart(
+        risk_distribution_chart(
+            scored,
+            review_cutoff=review_cutoff,
+            priority_cutoff=priority_cutoff,
+            policy_name=str(recommendation.threshold),
+        ),
+        width="stretch",
     )
-    distribution.update_traces(marker_color="#0F766E")
-    distribution.update_yaxes(title_text="Users")
-    distribution.add_vline(
-        x=score_cutoff,
-        line_dash="dash",
-        line_color="#C2410C",
-        annotation_text="Balanced cutoff",
-        annotation_position="top right",
-    )
-    left.plotly_chart(clean_chart(distribution), width="stretch")
 
     publisher = (
         scored.groupby("publisher_id", as_index=False)
         .agg(
             users=("user_id", "size"),
-            high_risk_share=("risk_percentile", lambda value: (value >= BALANCED_CUTOFF).mean()),
+            review_queue_users=(
+                "risk_percentile",
+                lambda value: (value >= review_cutoff).sum(),
+            ),
+            review_queue_share=(
+                "risk_percentile",
+                lambda value: (value >= review_cutoff).mean(),
+            ),
         )
-        .nlargest(10, "high_risk_share")
-        .sort_values("high_risk_share")
+        .nlargest(10, "review_queue_share")
     )
-    source_chart = px.bar(
-        publisher,
-        x="high_risk_share",
-        y="publisher_id",
-        orientation="h",
-        title="Publishers with the highest review-queue share",
-        labels={"high_risk_share": "Users above balanced cutoff", "publisher_id": "Publisher"},
-        hover_data={"users": ":,"},
+    st.plotly_chart(
+        source_review_share_chart(
+            publisher,
+            source_column="publisher_id",
+            overall_share=float(review_queue.mean()),
+        ),
+        width="stretch",
     )
-    source_chart.update_traces(marker_color="#2563EB")
-    source_chart.update_xaxes(tickformat=".0%")
-    right.plotly_chart(clean_chart(source_chart), width="stretch")
 
     with st.expander("How to read these metrics"):
         st.markdown(
             """
-- **Risk score** combines rules, robust distribution checks, Isolation Forest, and cluster rarity.
-- **Risk rank** compares a user with the current scoring batch; it is not a probability of fraud.
+- **Risk score** combines rules, robust distribution checks, Isolation Forest,
+  and cluster rarity.
+- **Risk rank** compares a user with the current scoring batch; it is not a
+  probability of fraud.
 - **Offline labels** are synthetic evaluation truth and never enter model features.
-- **Net savings** depends on explicit cost assumptions, so the operating threshold should be recalibrated when those costs change.
+- **Net savings** depends on explicit cost assumptions, so the operating
+  threshold should be recalibrated when those costs change.
 """
         )
         config = manifest["config"]
@@ -269,14 +279,17 @@ def render_overview(
         )
 
 
-def render_investigation(scored: pd.DataFrame, separation: pd.DataFrame) -> None:
+def render_investigation(
+    scored: pd.DataFrame, separation: pd.DataFrame, review_cutoff: float
+) -> None:
     page_intro(
         "Who should an analyst review first?",
-        "Filter the review queue, inspect one case, and see which behaviours separate flagged users.",
+        "Filter the review queue, inspect one case, and see which behaviours "
+        "separate flagged users.",
     )
     filter_cols = st.columns([1, 1.2, 1.4])
     minimum = filter_cols[0].slider(
-        "Minimum risk rank", 0.50, 1.00, BALANCED_CUTOFF, 0.01
+        "Minimum risk rank", 0.50, 1.00, review_cutoff, 0.01
     )
     country_filter = filter_cols[1].multiselect(
         "Country", sorted(scored.country.unique()), placeholder="All countries"
@@ -336,15 +349,7 @@ def render_investigation(scored: pd.DataFrame, separation: pd.DataFrame) -> None
             ],
         }
     ).sort_values("Contribution")
-    contribution_chart = px.bar(
-        contribution_data,
-        x="Contribution",
-        y="Detector",
-        orientation="h",
-        title="How each detector contributes to this account's score",
-        text_auto=".3f",
-    )
-    st.plotly_chart(clean_chart(contribution_chart, height=300), width="stretch")
+    st.plotly_chart(detector_contribution_chart(contribution_data), width="stretch")
 
     visible["signal_summary"] = visible.anomaly_explanation.map(explain_signals)
     table = visible[
@@ -386,10 +391,11 @@ def render_investigation(scored: pd.DataFrame, separation: pd.DataFrame) -> None
     )
 
     st.divider()
-    st.subheader("What separates the balanced review queue?")
+    st.subheader("What separates the recommended review queue?")
     st.caption(
         "Standardized mean differences compare flagged and unflagged users. "
-        "They describe separation; they are not causal feature importance."
+        "They describe separation—not causal feature importance—and use the "
+        "reference policy rather than the case filters above."
     )
     feature_labels = {
         "users_on_device": "Accounts on device",
@@ -407,67 +413,48 @@ def render_investigation(scored: pd.DataFrame, separation: pd.DataFrame) -> None
     chart_data["feature_label"] = chart_data.feature.map(feature_labels).fillna(
         chart_data.feature.str.replace("_", " ").str.title()
     )
-    chart_data = chart_data.sort_values("flagged_standardized_difference")
-    feature_chart = px.bar(
-        chart_data,
-        x="flagged_standardized_difference",
-        y="feature_label",
-        orientation="h",
-        labels={
-            "flagged_standardized_difference": "Standardized difference: flagged minus unflagged",
-            "feature_label": "Behaviour",
-        },
-    )
-    feature_chart.update_traces(marker_color="#7C3AED")
-    st.plotly_chart(clean_chart(feature_chart, height=420), width="stretch")
+    st.plotly_chart(feature_separation_chart(chart_data), width="stretch")
 
 
-def render_traffic_health(scored: pd.DataFrame) -> None:
+def render_traffic_health(
+    scored: pd.DataFrame, daily_health: pd.DataFrame, review_cutoff: float
+) -> None:
     page_intro(
         "Which traffic sources need attention?",
-        "Compare source volume, review-queue concentration, and reward exposure before changing partner policy.",
+        "Compare source volume, review-queue concentration, and reward exposure "
+        "before changing partner policy.",
     )
-    group_label = st.radio("Break down traffic by", ["Publisher", "Campaign"], horizontal=True)
+    group_label = st.radio(
+        "Break down traffic by", ["Publisher", "Campaign"], horizontal=True
+    )
     group_column = "publisher_id" if group_label == "Publisher" else "campaign_id"
     monitoring = scored.groupby(group_column, as_index=False).agg(
         users=("user_id", "size"),
-        above_cutoff_users=("risk_percentile", lambda value: (value >= BALANCED_CUTOFF).sum()),
-        review_queue_share=("risk_percentile", lambda value: (value >= BALANCED_CUTOFF).mean()),
+        review_queue_users=(
+            "risk_percentile", lambda value: (value >= review_cutoff).sum()
+        ),
+        review_queue_share=(
+            "risk_percentile", lambda value: (value >= review_cutoff).mean()
+        ),
         average_risk=("fraud_risk_score", "mean"),
         reward_cost_usd=("reward_cost_usd", "sum"),
     )
-    overall_share = scored.risk_percentile.ge(BALANCED_CUTOFF).mean()
-    source_plot = px.scatter(
-        monitoring,
-        x="users",
-        y="review_queue_share",
-        size="reward_cost_usd",
-        color="average_risk",
-        hover_name=group_column,
-        title=f"{group_label} volume vs. review-queue share",
-        labels={
-            "users": "Attributed users",
-            "review_queue_share": "Users above balanced cutoff",
-            "reward_cost_usd": "Reward cost (USD)",
-            "average_risk": "Average risk score",
-        },
-        color_continuous_scale="Tealgrn",
+    overall_share = float(scored.risk_percentile.ge(review_cutoff).mean())
+    st.plotly_chart(
+        traffic_priority_chart(
+            monitoring,
+            source_column=group_column,
+            source_label=group_label,
+            overall_share=overall_share,
+        ),
+        width="stretch",
     )
-    source_plot.update_yaxes(tickformat=".0%")
-    source_plot.add_hline(
-        y=overall_share,
-        line_dash="dash",
-        line_color="#6B7280",
-        annotation_text="Portfolio average",
-        annotation_position="bottom right",
-    )
-    st.plotly_chart(clean_chart(source_plot, height=470), width="stretch")
 
     display = monitoring.sort_values("review_queue_share", ascending=False).rename(
         columns={
             group_column: group_label,
             "users": "Users",
-            "above_cutoff_users": "Users above cutoff",
+            "review_queue_users": "Users above cutoff",
             "review_queue_share": "Review-queue share",
             "average_risk": "Average risk score",
             "reward_cost_usd": "Reward cost (USD)",
@@ -488,19 +475,57 @@ def render_traffic_health(scored: pd.DataFrame) -> None:
         "Investigate mix shifts and user-level explanations before taking partner action."
     )
 
+    st.divider()
+    st.subheader("Did suspicious reward timing spike?")
+    source_type = group_label.lower()
+    available_daily = daily_health[daily_health.source_type.eq(source_type)].copy()
+    priority_order = (
+        monitoring.assign(
+            priority_score=lambda frame: (
+                (frame.review_queue_share - overall_share).clip(lower=0)
+                * frame.reward_cost_usd
+            )
+        )
+        .sort_values("priority_score", ascending=False)[group_column]
+        .tolist()
+    )
+    available_sources = set(available_daily.source_id)
+    trend_options = [source for source in priority_order if source in available_sources]
+    selected_source = st.selectbox(
+        f"Inspect {source_type} trend",
+        trend_options,
+        help="The highest-priority source from the portfolio chart is selected first.",
+    )
+    st.plotly_chart(
+        source_trend_chart(
+            available_daily,
+            source_id=selected_source,
+            source_label=group_label,
+        ),
+        width="stretch",
+    )
+    st.caption(
+        "An instant claim occurs less than three seconds after an ad. The baseline "
+        "uses exactly the source's prior seven observed days, so the current day "
+        "cannot influence its comparison."
+    )
+
 
 def render_decision_lab(
     scored: pd.DataFrame, thresholds: pd.DataFrame, sensitivity: pd.DataFrame
 ) -> None:
     page_intro(
         "What is the right intervention threshold?",
-        "Explore operational load, then compare fixed policies using offline fraud labels and explicit cost assumptions.",
+        "Explore operational load, then compare fixed policies using offline fraud "
+        "labels and explicit cost assumptions.",
     )
+    recommendation = recommended_policy(thresholds)
+    recommended_cutoff = float(recommendation.risk_percentile_cutoff)
     cutoff = st.slider(
         "Risk-rank cutoff",
         0.70,
         0.99,
-        BALANCED_CUTOFF,
+        recommended_cutoff,
         0.01,
         help="Lower cutoffs catch more users and create more customer friction.",
     )
@@ -513,6 +538,9 @@ def render_decision_lab(
     st.caption(
         "Live operations should use these label-free workload measures. Precision, recall, "
         "and savings below are offline evaluations against synthetic truth."
+    )
+    st.plotly_chart(
+        threshold_workload_chart(scored, selected_cutoff=cutoff), width="stretch"
     )
 
     st.subheader("Three pre-defined operating policies")
@@ -552,85 +580,43 @@ def render_decision_lab(
         },
     )
 
-    economics = thresholds.copy()
-    economics["Policy"] = economics.threshold.str.title()
-    economics_chart = px.bar(
-        economics,
-        x="Policy",
-        y="estimated_net_savings_usd",
-        color="Policy",
-        title="Balanced maximizes modeled net savings",
-        labels={"estimated_net_savings_usd": "Estimated net savings (USD)"},
-        text_auto="$.3s",
+    st.plotly_chart(
+        policy_tradeoff_chart(thresholds, total_users=len(scored)), width="stretch"
     )
-    economics_chart.update_layout(showlegend=False)
-    st.plotly_chart(clean_chart(economics_chart), width="stretch")
     with st.expander("Economic assumptions behind this comparison"):
         st.markdown(
             """
 - Detected fraudulent reward cost is projected across four comparable future windows.
 - Each false positive carries **$0.35** of user-friction cost plus **1.5×** observed ad revenue.
 - These values are illustrative business assumptions, not measured production costs.
-- Re-ranking these policies under alternative costs is a required sensitivity check before deployment.
+- Re-ranking these policies under alternative costs is a required sensitivity
+  check before deployment.
 """
         )
 
-    st.subheader("Does Balanced remain best when assumptions change?")
-    optimal = sensitivity[sensitivity.is_optimal_in_scenario].copy()
-    optimal["Policy"] = optimal.threshold.str.title()
-    stability = (
-        optimal.Policy.value_counts()
-        .rename_axis("Policy")
-        .reset_index(name="Scenarios won")
+    st.subheader(
+        f"Does {recommendation.threshold.title()} remain best when assumptions change?"
     )
-    stability["Share of 16 scenarios"] = stability["Scenarios won"] / len(optimal)
-    stability_cols = st.columns([1, 1.5])
-    stability_cols[0].dataframe(
-        stability,
-        hide_index=True,
-        width="stretch",
-        column_config={
-            "Share of 16 scenarios": st.column_config.NumberColumn(format="percent")
-        },
+    sensitivity_figure, scenario_summary = policy_sensitivity_chart(sensitivity)
+    winner_counts = scenario_summary.winner.value_counts()
+    winning_policy = winner_counts.index[0]
+    sensitivity_metrics = st.columns(3)
+    sensitivity_metrics[0].metric(
+        "Most frequent winner",
+        winning_policy,
+        help=f"Wins {winner_counts.iloc[0]} of {len(scenario_summary)} scenarios.",
     )
-    matrix = optimal.pivot(
-        index="false_positive_fixed_cost_usd",
-        columns="fraud_loss_horizon_multiplier",
-        values="Policy",
+    sensitivity_metrics[1].metric(
+        "Narrowest lead",
+        f"${scenario_summary.winning_margin_usd.min():,.0f}",
+        help="Smallest advantage over the second-best policy.",
     )
-    policy_codes = {"Conservative": 0, "Balanced": 1, "Aggressive": 2}
-    policy_code = matrix.apply(lambda column: column.map(policy_codes)).astype(int)
-    heatmap = px.imshow(
-        policy_code,
-        aspect="auto",
-        labels={
-            "x": "Fraud-loss projection horizon (multiples)",
-            "y": "Fixed cost per false positive (USD)",
-            "color": "Winning policy",
-        },
-        color_continuous_scale=[
-            [0, "#2563EB"],
-            [0.5, "#0F766E"],
-            [1, "#C2410C"],
-        ],
-        range_color=[0, 2],
+    sensitivity_metrics[2].metric(
+        "Widest lead",
+        f"${scenario_summary.winning_margin_usd.max():,.0f}",
+        help="Largest advantage over the second-best policy.",
     )
-    for row_value in matrix.index:
-        for column_value in matrix.columns:
-            heatmap.add_annotation(
-                x=column_value,
-                y=row_value,
-                text=matrix.loc[row_value, column_value],
-                showarrow=False,
-                font=dict(color="white"),
-            )
-    heatmap.update_coloraxes(
-        colorbar=dict(
-            tickvals=[0, 1, 2],
-            ticktext=["Conservative", "Balanced", "Aggressive"],
-        )
-    )
-    stability_cols[1].plotly_chart(clean_chart(heatmap, height=360), width="stretch")
+    st.plotly_chart(sensitivity_figure, width="stretch")
     st.caption(
         "Sensitivity analysis varies the fraud-loss horizon and fixed false-positive cost. "
         "A recommendation that changes easily should be treated as assumption-sensitive."
@@ -640,7 +626,8 @@ def render_decision_lab(
 def render_experiment(experiment: dict, countries: pd.DataFrame) -> None:
     page_intro(
         "Did the new fraud rule create net value?",
-        "Read the primary cost outcome together with retention, segment heterogeneity, and multiple-testing risk.",
+        "Read the primary cost outcome together with retention, segment "
+        "heterogeneity, and multiple-testing risk.",
     )
     primary = experiment["primary_metric"]
     retention = experiment["retention_guardrail"]
@@ -658,7 +645,7 @@ def render_experiment(experiment: dict, countries: pd.DataFrame) -> None:
     result_metrics = st.columns(4)
     result_metrics[0].metric(
         "Fraud cost / assigned user",
-        f"USD {primary['control_mean']:.3f} → USD {primary['treatment_mean']:.3f}",
+        f"${primary['control_mean']:.3f} → ${primary['treatment_mean']:.3f}",
         help="Primary intent-to-treat outcome.",
     )
     result_metrics[1].metric(
@@ -685,53 +672,54 @@ def render_experiment(experiment: dict, countries: pd.DataFrame) -> None:
         f"{retention['ci_low'] * 100:+.2f} to {retention['ci_high'] * 100:+.2f} pp · "
         f"retention p={retention['p_value']:.3f} (inconclusive)"
     )
+    st.plotly_chart(experiment_value_waterfall(economics), width="stretch")
 
-    ordered = countries.sort_values("absolute_effect")
-    forest = go.Figure(
-        go.Scatter(
-            x=ordered.absolute_effect,
-            y=ordered.country,
-            mode="markers",
-            marker=dict(size=10, color="#0F766E"),
-            error_x=dict(
-                type="data",
-                symmetric=False,
-                array=ordered.ci_high - ordered.absolute_effect,
-                arrayminus=ordered.absolute_effect - ordered.ci_low,
-                color="#475569",
-            ),
-            customdata=ordered[["users", "p_value", "adjusted_p_value"]],
-            hovertemplate=(
-                "Country %{y}<br>Retention effect %{x:.2%}<br>Users %{customdata[0]:,}"
-                "<br>p=%{customdata[1]:.3f}<br>adjusted p=%{customdata[2]:.3f}<extra></extra>"
-            ),
-        )
+    st.subheader("Is the retention risk acceptably small?")
+    st.plotly_chart(
+        retention_forest_chart(
+            countries,
+            retention=retention,
+            noninferiority_margin=float(noninferiority["margin"]),
+            sample_size=int(experiment["sample_size"]),
+        ),
+        width="stretch",
     )
-    forest.add_vline(x=0, line_dash="dash", line_color="#6B7280")
-    forest.update_layout(
-        title="Country-level day-7 retention effects (95% confidence intervals)",
-        xaxis_title="Treatment effect on retention",
-        yaxis_title="Country",
+    confirmed_segments = int(countries.adjusted_p_value.lt(0.05).sum())
+    st.caption(
+        f"{confirmed_segments} of {len(countries)} country effects remain significant "
+        "after Benjamini–Hochberg correction. Hollow country markers emphasize that "
+        "these segment estimates are exploratory."
     )
-    forest.update_xaxes(tickformat=".1%")
-    st.plotly_chart(clean_chart(forest, height=430), width="stretch")
 
     st.info(
         "Do not optimize the apparent claim reduction among flagged treatment users. "
-        "That is a post-assignment subgroup and omits retention, false positives, and legitimate rewards."
+        "That is a post-assignment subgroup and omits retention, false positives, "
+        "and legitimate rewards."
     )
     with st.expander("Why this is not a global-launch decision", expanded=True):
         st.markdown(
             """
-1. The retention interval crosses zero by a very small margin and its lower bound fails the -2 percentage-point non-inferiority margin.
-2. Country estimates point in different directions, and only adjusted p-values should guide segment claims.
-3. The next test should pre-register fraud cost per assigned user as primary and retention as a non-inferiority guardrail.
+1. The retention interval crosses zero by a very small margin and its lower bound
+   fails the -2 percentage-point non-inferiority margin.
+2. Country estimates point in different directions, and only adjusted p-values
+   should guide segment claims.
+3. The next test should pre-register fraud cost per assigned user as primary and
+   retention as a non-inferiority guardrail.
 """
         )
 
 
 try:
-    scored, thresholds, experiment, countries, separation, sensitivity, manifest = load_artifacts()
+    (
+        scored,
+        thresholds,
+        experiment,
+        countries,
+        separation,
+        sensitivity,
+        daily_health,
+        manifest,
+    ) = load_artifacts()
 except FileNotFoundError as error:
     st.error(str(error))
     st.stop()
@@ -752,19 +740,21 @@ page = st.sidebar.radio(
 st.sidebar.divider()
 st.sidebar.markdown("**Optimize the decision, not the score.**")
 config = manifest["config"]
+recommended = recommended_policy(thresholds)
+review_cutoff = float(recommended.risk_percentile_cutoff)
 st.sidebar.caption(
     f"{config['n_users']:,} synthetic users · {config['days']}-day window\n\n"
     "Evaluation labels are isolated from scoring features."
 )
 
 if page == "0 · Start here":
-    render_start_here(manifest)
+    render_start_here(manifest, str(recommended.threshold))
 elif page == "1 · Decision overview":
     render_overview(scored, thresholds, manifest)
 elif page == "2 · Investigation queue":
-    render_investigation(scored, separation)
+    render_investigation(scored, separation, review_cutoff)
 elif page == "3 · Traffic health":
-    render_traffic_health(scored)
+    render_traffic_health(scored, daily_health, review_cutoff)
 elif page == "4 · Threshold decision lab":
     render_decision_lab(scored, thresholds, sensitivity)
 else:
