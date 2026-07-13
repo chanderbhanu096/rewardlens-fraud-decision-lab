@@ -271,7 +271,7 @@ python -m orchestration.pipeline --skip-generate
 ```
 
 A successful full run builds 15 dbt models, passes 32 dbt tests, and produces the
-anomaly and experiment artifacts. The independent Python suite contains 26 tests,
+anomaly and experiment artifacts. The independent Python suite contains 27 tests,
 including chart-semantics and render checks for every dashboard page.
 
 ## Inspect the outputs

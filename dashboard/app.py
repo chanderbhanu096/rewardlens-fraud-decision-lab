@@ -644,8 +644,8 @@ def render_experiment(experiment: dict, countries: pd.DataFrame) -> None:
     )
     result_metrics = st.columns(4)
     result_metrics[0].metric(
-        "Fraud cost / assigned user",
-        f"${primary['control_mean']:.3f} → ${primary['treatment_mean']:.3f}",
+        "Fraud cost / assigned user (USD)",
+        f"{primary['control_mean']:.3f} → {primary['treatment_mean']:.3f}",
         help="Primary intent-to-treat outcome.",
     )
     result_metrics[1].metric(
