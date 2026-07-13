@@ -4,6 +4,8 @@
 
 > **Optimize the decision, not the score.**
 
+**[Open the live RewardLens dashboard](https://rewardlens-fraud-lab.streamlit.app/)**
+
 RewardLens asks one practical question:
 
 > How can a rewarded-app business reduce post-install reward abuse without
